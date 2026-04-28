@@ -1,0 +1,1022 @@
+<?php
+session_start();
+$servername = "localhost";   // Usually 'localhost'
+$username = "root";          // Or your MySQL username
+$password = "";              // Your MySQL password (empty by default on local servers)
+$dbname = "contact"; // The database you created
+
+// Create connection
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+die("Connection failed: " . $conn->connect_error);
+}
+echo "Connected successfully";
+
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+$success_message = '';
+$error_message = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        $error_message = 'Invalid form submission.';
+    } else {
+        
+        $name = htmlspecialchars(trim($_POST['name'] ?? ''));
+        $email = filter_var(trim($_POST['email'] ?? ''), FILTER_SANITIZE_EMAIL);
+        $subject = htmlspecialchars(trim($_POST['subject'] ?? ''));
+        $message = htmlspecialchars(trim($_POST['message'] ?? ''));
+        
+        // Validate input
+        if (empty($name) || empty($email) || empty($subject) || empty($message)) {
+            $error_message = 'Please fill in all fields.';
+        } else{
+           $stmt = $conn->prepare("INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("ssss", $name, $email, $subject, $message);
+
+    if ($stmt->execute()) {
+        $success_message = 'Thank you for contacting us! We will get back to you soon.';
+        $_POST = array(); // Clear form
+    } else {
+        $error_message = 'There was an error saving your message. Please try again.';
+    }
+
+    $stmt->close();
+}
+}
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Knitting World</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="stylesheet" href="style.css">
+  <link rel="script" href="main.js"/>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet"/>
+  <style>
+  </style>
+</head>
+<body>
+
+<!-- ── Toast ─────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ── Navbar ─────────────────────────────────────────── -->
+<nav id="navbar">
+  <div class="nav-inner">
+    <a class="nav-logo" href="#" onclick="showPage('home')">
+      <span class="logo-icon"><img src=""/></span>
+      <div class="logo-text">K<span>w</span></div>
+    </a>
+
+    <ul class="nav-links">
+      <li><a href="#" onclick="showPage('home')" data-page="home">Home</a></li>
+      <li><a href="#" onclick="showPage('products')" data-page="products">Products</a></li>
+      <li><a href="#" onclick="showPage('categories')" data-page="categories">Categories</a></li>
+      <li><a href="#" onclick="showPage('about')" data-page="about">About</a></li>
+      <li><a href="#" onclick="showPage('admin')" data-page="admin">Admin</a></li>
+    </ul>
+
+    <div class="nav-actions">
+      <div class="search-wrap">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="search-input" placeholder="Search products…" oninput="handleSearch(this.value)"/>
+      </div>
+      <button id="cart-btn" onclick="toggleCart()">
+         Cart
+        <span id="cart-count">0</span>
+      </button>
+    </div>
+
+    <button class="hamburger" onclick="toggleMobile()" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div id="mobile-menu">
+    <a href="#" onclick="showPage('home');toggleMobile()">Home</a>
+    <a href="#" onclick="showPage('products');toggleMobile()">Products</a>
+    <a href="#" onclick="showPage('categories');toggleMobile()">Categories</a>
+    <a href="#" onclick="showPage('about');toggleMobile()">About</a>
+    <a href="#" onclick="showPage('admin');toggleMobile()">Admin</a>
+  </div>
+</nav>
+
+<!-- ── Cart Drawer ────────────────────────────────────── -->
+<div id="cart-overlay" onclick="toggleCart()"></div>
+<div id="cart-drawer">
+  <div class="cart-head">
+    <h2>🧶 My Cart</h2>
+    <button id="cart-close" onclick="toggleCart()">✕</button>
+  </div>
+  <div id="cart-items"></div>
+  <div class="cart-foot" id="cart-foot" style="display:none">
+    <div class="cart-total">
+      <span>Total</span>
+      <span id="cart-total-val">₹0</span>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="checkout()">Proceed to Checkout →</button>
+  </div>
+</div>
+
+<!-- ── Modal (Add/Edit Product) ──────────────────────── -->
+<div id="modal-overlay">
+  <div class="modal">
+    <h3 id="modal-title">Add Product</h3>
+    <input type="hidden" id="edit-id"/>
+    <div class="form-group">
+      <label>Product Name</label>
+      <input type="text" id="form-name" placeholder="e.g. Merino Wool Scarf"/>
+    </div>
+    <div class="form-group">
+      <label>Price (₹)</label>
+      <input type="number" id="form-price" placeholder="e.g. 599"/>
+    </div>
+    <div class="form-group">
+      <label>Category</label>
+      <select id="form-cat"></select>
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea id="form-desc" placeholder="Short product description…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Image URL</label>
+      <input type="text" id="form-img" placeholder="https://…"/>
+      <label for="image-upload">upload image:</label>
+      <input type="file" id="image-upload" accept="image/*"/>
+      <img id="preview-img" src="">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveProduct()">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  PAGE: HOME                                        -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="page-home" class="page active">
+
+  <!-- Hero -->
+  <section id="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">Welcome to the Love of Arts</div>
+        <h1 class="hero-title">Knitting<br/><em>World</em></h1>
+        <p class="hero-tagline">Handcrafted with Love · Wrapped in Warmth</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" onclick="showPage('products')">Shop Now →</button>
+          <button class="btn btn-outline" style="color:var(--white);border-color:rgba(255,253,249,.5)" onclick="showPage('about')">Our Story</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <div class="stats-strip">
+    <div class="stats-inner">
+      <div class="stat"><div class="stat-num">20+</div><div class="stat-label">Products</div></div>
+      <div class="stat"><div class="stat-num">15+</div><div class="stat-label">Years of Craft</div></div>
+      <div class="stat"><div class="stat-num">48hr</div><div class="stat-label">Delivery</div></div>
+    </div>
+  </div>
+
+  <!-- Featured Products -->
+  <section class="section" style="background:var(--cream)">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-label">Handpicked for You</div>
+        <h2 class="section-title">Featured Products</h2>
+        <p class="section-sub">Discover our most-loved yarn, kits, and finished pieces — each made with care.</p>
+      </div>
+      <div class="products-grid" id="featured-grid">
+        <div class="spinner">Loading products…</div>
+      </div>
+      <div style="text-align:center;margin-top:40px">
+        <button class="btn btn-outline" onclick="showPage('products')">View All Products →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact -->
+  <section class="section" style="background:var(--white)">
+    <div class="container">
+      <div class="section-header center fade-in">
+        <div class="section-label">Get in touch</div>
+        <h2 style="font-family:var(--font-display);font-size:clamp(2rem,4vw,3rem);margin-bottom:0.75rem;">
+      We'd Love to <em style="font-style:italic;color:var(--rose-dark);">Hear from You</em>
+    </h2>
+    <p style="color:var(--text-light);max-width:500px;margin:0 auto;">
+      Have questions about yarn, need help with an order, or just want to chat about knitting? We're here!
+    </p>
+      </div>
+     
+        <div class="contact-form-box">
+      <h3 style="font-family:var(--font-display);font-size:1.5rem;margin-bottom:0.5rem;">Send Us a Message</h3>
+      <p style="color:var(--text-light);font-size:0.88rem;margin-bottom:2rem;">We'll get back to you within 24 hours 💌</p>
+      <?php if ($success_message): ?>
+                    <div class="alert alert-success"><?php echo $success_message; ?></div>
+                <?php endif; ?>
+                
+                <?php if ($error_message): ?>
+                    <div class="alert alert-error"><?php echo $error_message; ?></div>
+                <?php endif; ?>
+                
+                <form method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                    
+                    <div class="form-group">
+                        <label for="name">Full Name *</label>
+                        <input type="text" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email">Email Address *</label>
+                        <input type="email" id="email" name="email" required value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="subject">Subject *</label>
+                        <input type="text" id="subject" name="subject" required value="<?php echo isset($_POST['subject']) ? htmlspecialchars($_POST['subject']) : ''; ?>">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="message">Message *</label>
+                        <textarea id="message" name="message" required><?php echo isset($_POST['message']) ? htmlspecialchars($_POST['message']) : ''; ?></textarea>
+                    </div>
+                    
+        <button type="submit" class="btn-primary" style="width:100%;justify-content:center;padding:16px;font-size:1rem;">
+          Send Message
+        </form>
+        </button>
+        <p style="font-size:0.78rem;color:var(--text-light);text-align:center;margin-top:1rem;">
+          Thanks for visiting Knitting World! We appreciate your interest and look forward to assisting you. Your message is important to us, and we'll do our best to respond as quickly as possible. Happy knitting!
+        </p>
+      </form>
+    </div>
+  </div>
+        <div class="contact-info-card" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:1rem;">
+
+        <a href="https://wa.me/message/NHEH5HLP47ETI1" 
+           target="_blank" class="whatsapp-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          Chat Now on WhatsApp
+        </a>
+      </div>
+    </div>
+
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="logo-text">Knitting<span> World</span></div>
+          <p>Your one-stop shop for premium yarns, knitting kits, and handcrafted goods. Bringing warmth, one stitch at a time.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Shop</h4>
+          <ul>
+            <li><a href="#" onclick="showPage('products')">All Products</a></li>
+            <li><a href="#" onclick="showPage('categories')">Categories</a></li>
+            <li><a href="#">New Arrivals</a></li>
+            <li><a href="#">Sale</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Help</h4>
+          <ul>
+            <li><a href="#">Shipping Info</a></li>
+            <li><a href="#">Returns</a></li>
+            <li><a href="#">FAQs</a></li>
+            <li><a href="#">Contact</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Connect</h4>
+          <ul>
+            <li><a href="#">Instagram</a></li>
+            <li><a href="#">Pinterest</a></li>
+            <li><a href="#">YouTube</a></li>
+            <li><a href="#">Newsletter</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 Knitting World. All rights reserved.</span>
+        <span>Made with love; </span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  PAGE: PRODUCTS                                    -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="page-products" class="page">
+  <section class="section">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-label">Our Collection</div>
+        <h2 class="section-title">All Products</h2>
+        <p class="section-sub">Browse our full range of yarns, needles, kits, and finished goods.</p>
+      </div>
+      <div class="filter-tags" id="product-filters"></div>
+      <div class="products-grid" id="products-grid">
+        <div class="spinner">Loading products…</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+ 
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  PAGE: CATEGORIES                                  -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="page-categories" class="page">
+  <section class="section">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-label">Browse By</div>
+        <h2 class="section-title">Categories</h2>
+        <p class="section-sub">Find exactly what you need, organised by type.</p>
+      </div>
+      <div class="categories-grid" id="cat-grid">
+        <div class="spinner">Loading categories…</div>
+      </div>
+      <div style="margin-top:60px">
+        <div class="section-header fade-in" style="margin-bottom:32px">
+          <h2 class="section-title" style="font-size:1.8rem">Products in: <span id="active-cat-name" style="color:var(--rust)">All</span></h2>
+        </div>
+        <div class="filter-tags" id="cat-filter-tags"></div>
+        <div class="products-grid" id="cat-products-grid">
+          <div class="spinner">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  PAGE: ABOUT                                       -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="page-about" class="page">
+  <div class="about-hero">
+    <div class="container">
+      <div class="section-label" style="color:var(--tan)">Our Story</div>
+      <h1>Handcrafted with Love,<br/>Shared with the World</h1>
+      <p>From a small studio in Kargil,Ladakh to homes across India — we weave warmth into every stitch.</p>
+    </div>
+  </div>
+  <section class="section">
+    <div class="container">
+      <div class="about-grid fade-in">
+        <div class="about-img-wrap">
+          <img src="https://plus.unsplash.com/premium_photo-1681966422943-67fbb15a02a5?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" alt="Knitting studio"/>
+        </div>
+        <div>
+          <div class="section-label">Who We Are</div>
+          <h2 class="section-title">A Family of Makers</h2>
+          <p style="color:#7a6355;line-height:1.8;margin-bottom:20px">
+            Knitting World was born in 2010 when founder <strong>Khatija Akhter</strong> began selling handknit shawls at local craft fairs in Jaipur. What started as a weekend passion grew into a thriving community of makers, crafters, and yarn lovers.
+          </p>
+          <p style="color:#7a6355;line-height:1.8;margin-bottom:28px">
+            Today, we offer over 500 products — from premium Merino yarns to beginner knitting kits — and ship to every corner of India. Every product is chosen with care, and many are still made by hand in our partner workshops.
+          </p>
+          <button class="btn btn-primary" onclick="showPage('products')">Explore Products →</button>
+        </div>
+      </div>
+
+      <div class="mvs-grid fade-in" style="margin-top:72px">
+        <div class="mvs-card">
+          <div class="mvs-icon"></div>
+          <h3>Our Mission</h3>
+          <p>To make the joy of knitting accessible to everyone — from curious beginners to seasoned artisans — with quality materials and inspiring guidance.</p>
+        </div>
+        <div class="mvs-card">
+          <div class="mvs-icon"></div>
+          <h3>Our Vision</h3>
+          <p>A world where handmade is valued, slow crafts are celebrated, and every home holds something made with love.</p>
+        </div>
+        <div class="mvs-card">
+          <div class="mvs-icon"></div>
+          <h3>Our Story</h3>
+          <p>Fifteen years of stitches, workshops, midnight knit-alongs, and a community that continues to inspire us every single day.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  PAGE: ADMIN                                       -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="page-admin" class="page">
+  <!-- Login -->
+  <div id="admin-login" class="admin-login-wrap">
+    <div class="login-card">
+      <div class="logo-area">
+        <div class="icon"></div>
+        <h2>Admin Panel</h2>
+        <p>Knitting World · Secure Login</p>
+      </div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="admin-user" placeholder="" value=""/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="admin-pass" placeholder="" value=""
+               onkeydown="if(event.key==='Enter')adminLogin()"/>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="adminLogin()">Login →</button>
+      <p style="text-align:center;font-size:.8rem;color:#a08470;margin-top:16px"></p>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="admin-dash" class="admin-dashboard" style="display:none">
+    <div class="container">
+      <div class="dashboard-header">
+        <div>
+          <div class="section-label">Admin Panel</div>
+          <h2>Dashboard</h2>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="adminLogout()">Logout</button>
+      </div>
+
+      <div class="dash-stats" id="dash-stats"></div>
+
+      <!-- Category Manager -->
+      <div class="admin-table-wrap">
+        <div class="admin-table-head">
+          <h3> Categories</h3>
+          <button class="btn btn-sage btn-sm" onclick="addCatPrompt()">+ Add Category</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Products</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="cat-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Product Manager -->
+      <div class="admin-table-wrap">
+        <div class="admin-table-head">
+          <h3> Products</h3>
+          <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Product</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="product-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  JAVASCRIPT                                        -->
+<!-- ═══════════════════════════════════════════════════ -->
+<script>
+
+const input = document.getElementById('image-upload');
+const preview = document.getElementById('preview-img');
+
+input.addEventListener('change', function() {
+    const file = this.files[0]; // Pehli file jo select hui
+
+    if (file) {
+        // Ek temporary URL create karein
+        const reader = new FileReader();
+
+        reader.onload = function(e) {
+            preview.src = e.target.result; // Image ka source set karein
+            preview.style.display = 'block'; // Image ko visible karein
+        }
+
+        reader.readAsDataURL(file);
+    } else {
+        preview.style.display = 'none';
+    }
+});
+
+/* ── Seed Data (simulates MySQL via localStorage) ──── */
+const SEED_CATEGORIES = [
+  { id:1, name:'Yarns',       img:'' },
+  { id:2, name:'Needles',     img:'' },
+  { id:3, name:'Kits',        img:'' },
+  { id:4, name:'Accessories', img:'' },
+  { id:5, name:'Patterns',    img:'' },
+  { id:6, name:'Finished',    img:'' },
+];
+
+const SEED_PRODUCTS = [
+  { id:1,  name:'Merino Wool Bundle',    price:849,  category_id:1, description:'Soft 100% merino, 3-ply, perfect for sweaters and shawls.', image:'', badge:'' },
+  { id:2,  name:'Bamboo Circular Set',   price:1249, category_id:2, description:'Smooth bamboo tips on flexible cables — 60 & 80 cm lengths.', image:'', badge:'' },
+  { id:3,  name:'Beginner Starter Kit',  price:699,  category_id:3, description:'Everything you need to knit your first scarf: yarn, needles, guide.', image:'', badge:'' },
+  { id:4,  name:'Alpaca Blend Skein',    price:599,  category_id:1, description:'Luxurious alpaca-wool blend in 20 rich seasonal colours.', image:'', badge:'' },
+  { id:5,  name:'Stitch Marker Set',     price:199,  category_id:4, description:'40-piece colourful stitch markers in a travel-friendly case.', image:'', badge:'' },
+  { id:6,  name:'Cabled Sweater Pattern',price:299,  category_id:5, description:'Intermediate cable knit sweater pattern with video tutorials.', image:'', badge:'' },
+  { id:7,  name:'Hand-Knit Wool Shawl',  price:1799, category_id:6, description:'Artisan-made shawl in rust & cream — one of a kind.', image:'', badge:'Handmade' },
+  { id:8,  name:'Cotton Summer Yarn',    price:399,  category_id:1, description:'Breathable 100% cotton, ideal for lightweight summer projects.', image:'', badge:'' },
+  { id:9,  name:'Interchangeable Needle Kit', price:2199, category_id:2, description:'Complete set of stainless steel tips with multiple cable lengths.', image:'', badge:'' },
+  { id:10, name:'Cozy Socks Kit',        price:549,  category_id:3, description:'Beginner-friendly sock kit with self-striping yarn and pattern.', image:'', badge:'' },
+];
+
+const SEED_USERS = [{ id:1, username:'admin', password:'admin123' }];
+
+/* ── Local "Database" ───────────────────────────────── */
+function initDB() {
+  if (!ls('kw_categories')) ls('kw_categories', JSON.stringify(SEED_CATEGORIES));
+  if (!ls('kw_products'))   ls('kw_products',   JSON.stringify(SEED_PRODUCTS));
+  if (!ls('kw_users'))      ls('kw_users',       JSON.stringify(SEED_USERS));
+  if (!ls('kw_cart'))       ls('kw_cart',         JSON.stringify([]));
+}
+
+function ls(key, val) {
+  if (val !== undefined) localStorage.setItem(key, val);
+  return localStorage.getItem(key);
+}
+
+function getCategories() { return JSON.parse(ls('kw_categories')) || []; }
+function getProducts()   { return JSON.parse(ls('kw_products'))   || []; }
+function getCart()       { return JSON.parse(ls('kw_cart'))       || []; }
+function saveCart(c)     { ls('kw_cart', JSON.stringify(c)); }
+function saveProducts(p) { ls('kw_products', JSON.stringify(p)); }
+function saveCategories(c){ ls('kw_categories', JSON.stringify(c)); }
+
+function nextId(arr) { return arr.length ? Math.max(...arr.map(x=>x.id))+1 : 1; }
+
+/* ── Page Navigation ────────────────────────────────── */
+let currentPage = 'home';
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-links a').forEach(a=>{
+    a.classList.toggle('active', a.dataset.page===name);
+  });
+  currentPage = name;
+  window.scrollTo(0,0);
+
+  if (name==='home')       renderFeatured();
+  if (name==='products')   renderProducts();
+  if (name==='categories') renderCategories();
+  if (name==='admin')      checkAdmin();
+
+  observeFade();
+  return false;
+}
+
+/* ── Toast ─────────────────────────────────────────── */
+function toast(msg, dur=2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), dur);
+}
+
+/* ── Product Card ───────────────────────────────────── */
+function catName(catId) {
+  const c = getCategories().find(x=>x.id===catId);
+  return c ? c.name : 'General';
+}
+
+function productCard(p) {
+  return `
+  <div class="product-card fade-in" data-id="${p.id}">
+    <div class="product-img-wrap">
+      ${p.badge ? `<div class="product-badge">${p.badge}</div>` : ''}
+      <button class="product-wish" onclick="wishlist(${p.id})" title="Wishlist">♡</button>
+      <img src="${p.image}" alt="${p.name}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1558171813-0f9f9b2d4488?w=400&q=60'"/>
+    </div>
+    <div class="product-info">
+      <div class="product-cat">${catName(p.category_id)}</div>
+      <div class="product-name">${p.name}</div>
+      <div class="product-desc">${p.description}</div>
+      <div class="product-footer">
+        <div class="product-price">₹${p.price.toLocaleString()}</div>
+        <button class="btn btn-primary btn-sm" onclick="addToCart(${p.id})">Add to Cart</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ── Featured ────────────────────────────────────────── */
+function renderFeatured() {
+  const grid = document.getElementById('featured-grid');
+  const products = getProducts().slice(0,4);
+  grid.innerHTML = products.map(productCard).join('');
+  observeFade();
+}
+
+/* ── Products Page ───────────────────────────────────── */
+let activeFilter = 'all';
+let searchQuery  = '';
+
+function renderProducts() {
+  // Filter tags
+  const cats = getCategories();
+  const filtersEl = document.getElementById('product-filters');
+  filtersEl.innerHTML = `<button class="filter-tag ${activeFilter==='all'?'active':''}" onclick="setFilter('all')">All</button>`
+    + cats.map(c=>`<button class="filter-tag ${activeFilter===c.id?'active':''}" onclick="setFilter(${c.id})">${c.name}</button>`).join('');
+
+  // Products
+  let products = getProducts();
+  if (activeFilter !== 'all') products = products.filter(p=>p.category_id===activeFilter);
+  if (searchQuery) products = products.filter(p=>p.name.toLowerCase().includes(searchQuery)||p.description.toLowerCase().includes(searchQuery));
+
+  const grid = document.getElementById('products-grid');
+  grid.innerHTML = products.length
+    ? products.map(productCard).join('')
+    : '<p style="color:#a08470;padding:40px;text-align:center">No products found.</p>';
+  observeFade();
+}
+
+function setFilter(val) {
+  activeFilter = val;
+  renderProducts();
+}
+
+function handleSearch(val) {
+  searchQuery = val.toLowerCase();
+  if (currentPage === 'products') renderProducts();
+}
+
+/* ── Categories Page ─────────────────────────────────── */
+let activeCatFilter = 'all';
+
+function renderCategories() {
+  const cats = getCategories();
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML = cats.map(c=>`
+    <div class="cat-card fade-in" onclick="filterByCat(${c.id},'${c.name}')">
+      <img src="${c.img}" alt="${c.name}" loading="lazy"/>
+      <div class="cat-overlay">
+        <div>
+          <div class="cat-name">${c.name}</div>
+          <div class="cat-count">${getProducts().filter(p=>p.category_id===c.id).length} products</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  renderCatProducts();
+  observeFade();
+}
+
+function filterByCat(id, name) {
+  activeCatFilter = id;
+  document.getElementById('active-cat-name').textContent = name;
+  renderCatProducts();
+}
+
+function renderCatProducts() {
+  const cats = getCategories();
+  const tags = document.getElementById('cat-filter-tags');
+  tags.innerHTML = `<button class="filter-tag ${activeCatFilter==='all'?'active':''}" onclick="filterByCat('all','All')">All</button>`
+    + cats.map(c=>`<button class="filter-tag ${activeCatFilter===c.id?'active':''}" onclick="filterByCat(${c.id},'${c.name}')">${c.name}</button>`).join('');
+
+  let products = getProducts();
+  if (activeCatFilter !== 'all') products = products.filter(p=>p.category_id===activeCatFilter);
+
+  const grid = document.getElementById('cat-products-grid');
+  grid.innerHTML = products.length
+    ? products.map(productCard).join('')
+    : '<p style="color:#a08470;padding:40px;text-align:center">No products in this category.</p>';
+  observeFade();
+}
+
+/* ── Cart ───────────────────────────────────────────── */
+function addToCart(productId) {
+  const cart = getCart();
+  const existing = cart.find(i=>i.id===productId);
+  if (existing) { existing.qty++; }
+  else {
+    const p = getProducts().find(x=>x.id===productId);
+    if (p) cart.push({...p, qty:1});
+  }
+  saveCart(cart);
+  updateCartUI();
+  toast('Added to cart ');
+}
+
+function removeFromCart(productId) {
+  const cart = getCart().filter(i=>i.id!==productId);
+  saveCart(cart);
+  updateCartUI();
+  renderCartItems();
+}
+
+function updateQty(productId, delta) {
+  const cart = getCart();
+  const item = cart.find(i=>i.id===productId);
+  if (!item) return;
+  item.qty = Math.max(1, item.qty+delta);
+  saveCart(cart);
+  updateCartUI();
+  renderCartItems();
+}
+
+function updateCartUI() {
+  const cart = getCart();
+  const count = cart.reduce((s,i)=>s+i.qty, 0);
+  document.getElementById('cart-count').textContent = count;
+}
+
+function toggleCart() {
+  document.getElementById('cart-overlay').classList.toggle('open');
+  document.getElementById('cart-drawer').classList.toggle('open');
+  renderCartItems();
+}
+
+function renderCartItems() {
+  const cart = getCart();
+  const el = document.getElementById('cart-items');
+  const foot = document.getElementById('cart-foot');
+
+  if (!cart.length) {
+    el.innerHTML = `<div class="cart-empty"><div class="cart-empty-icon"></div><p>Your cart is empty</p></div>`;
+    foot.style.display = 'none';
+    return;
+  }
+
+  el.innerHTML = cart.map(item=>`
+    <div class="cart-item">
+      <img src="${item.image}" alt="${item.name}" onerror="this.src='https://images.unsplash.com/photo-1558171813-0f9f9b2d4488?w=100&q=60'"/>
+      <div class="cart-item-info">
+        <div class="cart-item-name">${item.name}</div>
+        <div class="cart-item-price">₹${(item.price*item.qty).toLocaleString()}</div>
+        <div class="cart-item-qty">
+          <button class="qty-btn" onclick="updateQty(${item.id},-1)">−</button>
+          <span>${item.qty}</span>
+          <button class="qty-btn" onclick="updateQty(${item.id},1)">+</button>
+        </div>
+      </div>
+      <button class="cart-item-remove" onclick="removeFromCart(${item.id})" title="Remove">✕</button>
+    </div>
+  `).join('');
+
+  const total = cart.reduce((s,i)=>s+i.price*i.qty, 0);
+  document.getElementById('cart-total-val').textContent = '₹'+total.toLocaleString();
+  foot.style.display = 'block';
+}
+
+function checkout() {
+  toast('Thank you for your order!');
+  saveCart([]);
+  updateCartUI();
+  toggleCart();
+}
+
+function wishlist(id) {
+  toast('Added to wishlist ♡');
+}
+
+/* ── Admin Auth ──────────────────────────────────────── */
+let adminLoggedIn = false;
+
+function adminLogin() {
+  const u = document.getElementById('admin-user').value.trim();
+  const p = document.getElementById('admin-pass').value.trim();
+  const users = JSON.parse(ls('kw_users'));
+  const user = users.find(x=>x.username===u && x.password===p);
+  if (user) {
+    adminLoggedIn = true;
+    document.getElementById('admin-login').style.display = 'none';
+    document.getElementById('admin-dash').style.display = 'block';
+    renderDashboard();
+  } else {
+    toast('Invalid credentials ❌');
+  }
+}
+
+function adminLogout() {
+  adminLoggedIn = false;
+  document.getElementById('admin-login').style.display = 'flex';
+  document.getElementById('admin-dash').style.display = 'none';
+}
+
+function checkAdmin() {
+  if (!adminLoggedIn) {
+    document.getElementById('admin-login').style.display = 'flex';
+    document.getElementById('admin-dash').style.display = 'none';
+  } else {
+    renderDashboard();
+  }
+}
+
+/* ── Admin Dashboard ─────────────────────────────────── */
+function renderDashboard() {
+  const products = getProducts();
+  const cats = getCategories();
+
+  // Stats
+  const stats = [
+    { label:'Total Products', value: products.length },
+    { label:'Categories',     value: cats.length },
+    { label:'Avg Price',      value:'₹'+(products.reduce((s,p)=>s+p.price,0)/products.length||0).toFixed(0) },
+    { label:'Cart Items',     value: getCart().reduce((s,i)=>s+i.qty,0) },
+  ];
+  document.getElementById('dash-stats').innerHTML = stats.map(s=>`
+    <div class="dash-stat">
+      <div class="label">${s.label}</div>
+      <div class="value">${s.value}</div>
+    </div>`).join('');
+
+  // Cat table
+  document.getElementById('cat-table-body').innerHTML = cats.map(c=>`
+    <tr>
+      <td>${c.id}</td>
+      <td><strong>${c.name}</strong></td>
+      <td>${products.filter(p=>p.category_id===c.id).length}</td>
+      <td class="action-btns">
+        <button class="edit-btn" onclick="editCat(${c.id})">Edit</button>
+        <button class="del-btn"  onclick="deleteCat(${c.id})">Delete</button>
+      </td>
+    </tr>`).join('');
+
+  // Product table
+  document.getElementById('product-table-body').innerHTML = products.map(p=>`
+    <tr>
+      <td><img src="${p.image}" alt="${p.name}" onerror="this.src='https://images.unsplash.com/photo-1558171813-0f9f9b2d4488?w=60&q=60'"/></td>
+      <td><strong>${p.name}</strong></td>
+      <td>${catName(p.category_id)}</td>
+      <td>₹${p.price.toLocaleString()}</td>
+      <td>
+        <div class="action-btns">
+          <button class="edit-btn" onclick="editProduct(${p.id})">Edit</button>
+          <button class="del-btn"  onclick="deleteProduct(${p.id})">Delete</button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+/* ── Modal ───────────────────────────────────────────── */
+function openModal(product) {
+  const cats = getCategories();
+  document.getElementById('form-cat').innerHTML = cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+
+  if (product) {
+    document.getElementById('modal-title').textContent = 'Edit Product';
+    document.getElementById('edit-id').value    = product.id;
+    document.getElementById('form-name').value  = product.name;
+    document.getElementById('form-price').value = product.price;
+    document.getElementById('form-cat').value   = product.category_id;
+    document.getElementById('form-desc').value  = product.description;
+    document.getElementById('form-img').value   = product.image;
+  } else {
+    document.getElementById('modal-title').textContent = 'Add Product';
+    document.getElementById('edit-id').value = '';
+    ['form-name','form-price','form-desc','form-img'].forEach(id=>document.getElementById(id).value='');
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function editProduct(id) {
+  const p = getProducts().find(x=>x.id===id);
+  if (p) openModal(p);
+}
+
+function saveProduct() {
+  const name  = document.getElementById('form-name').value.trim();
+  const price = parseFloat(document.getElementById('form-price').value);
+  const catId = parseInt(document.getElementById('form-cat').value);
+  const desc  = document.getElementById('form-desc').value.trim();
+  const img   = document.getElementById('form-img').value.trim();
+  const editId = document.getElementById('edit-id').value;
+
+function saveProduct() {
+    // Purana URL wala input
+    const urlInput = document.getElementById('form-img').value; 
+    
+    // Agar local upload kiya hai toh currentImageData use karein, 
+    // nahi toh URL box wala value
+    const finalImage = currentImageData ? currentImageData : urlInput;
+
+    const newProduct = {
+        id: Date.now(),
+        name: document.getElementById('form-name').value, // Jo bhi aapke fields hain
+        img: finalImage, // Ye final image data jayega
+        // ... baki details
+    };
+
+    // Ab is newProduct ko apni product list/localStorage mein push karein
+}
+
+
+
+
+  if (!name || !price) { toast('Name and price are required ❗'); return; }
+
+  const products = getProducts();
+
+  if (editId) {
+    const idx = products.findIndex(x=>x.id===parseInt(editId));
+    if (idx>=0) products[idx] = {...products[idx], name, price, category_id:catId, description:desc, image:img};
+    toast('Product updated ✅');
+  } else {
+    products.push({ id:nextId(products), name, price, category_id:catId, description:desc, image:img, badge:'' });
+    toast('Product added ✅');
+  }
+
+  saveProducts(products);
+  closeModal();
+  renderDashboard();
+}
+
+function deleteProduct(id) {
+  if (!confirm('Delete this product?')) return;
+  saveProducts(getProducts().filter(p=>p.id!==id));
+  toast('Product deleted 🗑️');
+  renderDashboard();
+}
+
+/* ── Category CRUD ───────────────────────────────────── */
+function addCatPrompt() {
+  const name = prompt('Category name:');
+  if (!name) return;
+  const cats = getCategories();
+  cats.push({ id:nextId(cats), name:name.trim(), img:'https://images.unsplash.com/photo-1558171813-0f9f9b2d4488?w=600&q=70' });
+  saveCategories(cats);
+  toast('Category added ✅');
+  renderDashboard();
+}
+
+function editCat(id) {
+  const cats = getCategories();
+  const cat = cats.find(c=>c.id===id);
+  if (!cat) return;
+  const newName = prompt('Edit category name:', cat.name);
+  if (!newName) return;
+  cat.name = newName.trim();
+  saveCategories(cats);
+  toast('Category updated ✅');
+  renderDashboard();
+}
+
+function deleteCat(id) {
+  if (!confirm('Delete this category? Products in it will remain.')) return;
+  saveCategories(getCategories().filter(c=>c.id!==id));
+  toast('Category deleted 🗑️');
+  renderDashboard();
+}
+
+/* ── Navbar scroll effect ────────────────────────────── */
+window.addEventListener('scroll', ()=>{
+  document.getElementById('navbar').classList.toggle('scrolled', window.scrollY>50);
+});
+
+/* ── Mobile Menu ─────────────────────────────────────── */
+function toggleMobile() {
+  document.getElementById('mobile-menu').classList.toggle('open');
+}
+
+/* ── Fade-in Observer ────────────────────────────────── */
+function observeFade() {
+  const els = document.querySelectorAll('.fade-in:not(.visible)');
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(el=>el.classList.add('visible')); return;
+  }
+  const obs = new IntersectionObserver(entries=>{
+    entries.forEach(e=>{ if(e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); } });
+  }, { threshold:.12 });
+  els.forEach(el=>obs.observe(el));
+}
+
+/* ── Init ────────────────────────────────────────────── */
+initDB();
+updateCartUI();
+renderFeatured();
+observeFade();
+
+// Close modal on outside click
+document.getElementById('modal-overlay').addEventListener('click', e=>{
+  if(e.target === document.getElementById('modal-overlay')) closeModal();
+});
+</script>
+</body>
+</html>

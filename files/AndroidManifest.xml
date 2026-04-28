@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.knittingworld">
+
+    <!-- Permissions -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <application
+        android:name=".KnittingWorldApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.KnittingWorld"
+        android:usesCleartextTraffic="true">
+
+        <!-- Splash Screen -->
+        <activity
+            android:name=".ui.splash.SplashActivity"
+            android:exported="true"
+            android:theme="@style/Theme.KnittingWorld.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Auth Activities -->
+        <activity
+            android:name=".ui.auth.LoginActivity"
+            android:windowSoftInputMode="adjustResize"/>
+        <activity
+            android:name=".ui.auth.RegisterActivity"
+            android:windowSoftInputMode="adjustResize"/>
+
+        <!-- Buyer Activities -->
+        <activity
+            android:name=".ui.home.MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ui.product.ProductDetailActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ui.product.SearchActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"/>
+        <activity
+            android:name=".ui.cart.CheckoutActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ui.order.OrderTrackingActivity"
+            android:exported="false"/>
+
+        <!-- Seller Activities -->
+        <activity
+            android:name=".ui.seller.SellerDashboardActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ui.seller.AddEditProductActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"/>
+        <activity
+            android:name=".ui.seller.SellerOrderDetailActivity"
+            android:exported="false"/>
+
+        <!-- Firebase Messaging Service -->
+        <service
+            android:name=".service.KnittingWorldMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+
+        <!-- Image Picker Provider -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths"/>
+        </provider>
+
+    </application>
+</manifest>
